@@ -1,35 +1,25 @@
-from datetime import timedelta
+import logging
 from sqlalchemy.orm import Session
-from auth_server.models.models import User
-from auth_server.utils import verify_password, create_access_token
-from auth_server.settings import settings
+from auth_service.auth_server.services.user import UserService
+from auth_service.auth_server.utils import create_access_token, create_refresh_token, decode_token
+from auth_service.auth_server.models.enums import TokenType
+from auth_service.auth_server.schemas.token import TokenResponse, TokenRequest, RefreshTokenRequest
+from auth_service.auth_server.exceptions import Err, UnauthorizedException
 
+LOG = logging.getLogger(__name__)
 
-def authenticate_user(db: Session, email: str, password: str):
-    user = db.query(User).filter(User.email == email).first()
+class TokenService:
+    def __init__(self, db: Session):
+        self.db = db; self.user_service = UserService(db)
 
-    if not user:
-        return None
+    def login(self, data: TokenRequest) -> TokenResponse:
+        user = self.user_service.authenticate(data.mail, data.password)
+        return TokenResponse(access_token=create_access_token(user.id),
+                             refresh_token=create_refresh_token(user.id))
 
-    if not verify_password(password, user.password):
-        return None
-
-    return user
-
-
-def login(db: Session, email: str, password: str):
-
-    user = authenticate_user(db, email, password)
-
-    if not user:
-        return None
-
-    access_token = create_access_token(
-        data={"sub": str(user.id)},
-        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    )
-
-    return {
-        "access_token": access_token,
-        "token_type": "bearer"
-    }
+    def refresh(self, data: RefreshTokenRequest) -> TokenResponse:
+        user_id = decode_token(data.refresh_token, TokenType.REFRESH)
+        user = self.user_service.get_by_id(user_id)
+        if not user.is_active: raise UnauthorizedException(Err.OA0038)
+        return TokenResponse(access_token=create_access_token(user.id),
+                             refresh_token=create_refresh_token(user.id))

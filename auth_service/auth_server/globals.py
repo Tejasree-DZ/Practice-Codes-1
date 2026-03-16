@@ -1,27 +1,15 @@
-# db.py
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy import create_engine
-from typing import Generator
-from .settings import settings
+import logging
+import sys
 
-# Create SQLAlchemy engine
-engine = create_engine(
-    settings.DATABASE_URL,
-    echo=True,  
-    future=True
-)
 
-# Create session local class
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine
-)
-
-# Dependency for FastAPI
-def get_db() -> Generator[Session, None, None]:
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+def configure_logging(debug: bool = False):
+    level = logging.DEBUG if debug else logging.INFO
+    logging.basicConfig(
+        stream=sys.stdout,
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.engine").setLevel(
+        logging.DEBUG if debug else logging.WARNING
+    )

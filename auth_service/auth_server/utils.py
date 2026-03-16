@@ -1,20 +1,15 @@
-import enum
 import hashlib
-import json
 import re
-import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
-import bcrypt
 from jose import JWTError, jwt
 from sqlalchemy import inspect
 
 from auth_service.auth_server.settings import settings
-
-
-MAX_32_INT = 2 ** 31 - 1
-
+from auth_service.auth_server.exceptions import (
+    Err, WrongArgumentsException, InvalidTokenException
+)
 
 
 def as_dict(obj) -> dict:
@@ -22,45 +17,8 @@ def as_dict(obj) -> dict:
             for c in inspect(obj).mapper.column_attrs}
 
 
-class ModelEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        if isinstance(obj, enum.Enum):
-            return obj.value
-        if isinstance(obj, bytes):
-            return obj.decode()
-        if isinstance(obj, set):
-            return list(obj)
-        return json.JSONEncoder.default(self, obj)
-
-
-def is_email_format(check_str: str) -> bool:
-    regex = (r"^[a-z0-9!#$%&\'*+/=?`{|}~\^\-\+_()]+"
-             r"(\.[a-z0-9!#$%&\'*+/=?`{|}~\^\-\+_()]+)*"
-             r"@[a-z0-9-]+(\.[a-z0-9-]+)*(\.[a-z]{2,18})$")
-    return bool(re.match(regex, str(check_str).lower()))
-
-
-def is_uuid(check_str: str) -> bool:
-    pattern = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
-    return bool(re.match(pattern, str(check_str).lower()))
-
-
-def strtobool(val: str) -> bool:
-    val = val.lower()
-    if val not in ['true', 'false']:
-        raise ValueError('Should be false or true')
-    return val == 'true'
-
-
-def unique_list(list_to_filter: list) -> list:
-    return list(set(list_to_filter))
-
-
-def get_input(keys: list, **inputs) -> dict:
-    return dict(filter(lambda x: x[1] is not None,
-                       {key: inputs.get(key) for key in keys}.items()))
+def get_current_timestamp() -> int:
+    return int(datetime.now(timezone.utc).timestamp())
 
 
 def hash_password(password: str, salt: str) -> str:
@@ -77,19 +35,38 @@ def get_digest(val: str) -> str:
     return hashlib.md5(val.encode('utf-8')).hexdigest()
 
 
-def _create_token(
-    subject: str,
-    token_type: str,
-    expires_delta: timedelta,
-    extra: dict[str, Any] | None = None,
-) -> str:
-    from auth_service.auth_server.models.enums import TokenType
+def is_email_format(check_str: str) -> bool:
+    regex = (r"^[a-z0-9!#$%&\'*+/=?`{|}~\^\-\+_()]+"
+             r"(\.[a-z0-9!#$%&\'*+/=?`{|}~\^\-\+_()]+)*"
+             r"@[a-z0-9-]+(\.[a-z0-9-]+)*(\.[a-z]{2,18})$")
+    return bool(re.match(regex, str(check_str).lower()))
+
+
+def is_uuid(check_str: str) -> bool:
+    pattern = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+    return bool(re.match(pattern, str(check_str).lower()))
+
+
+def check_string_attribute(name: str, value, min_length=1, max_length=255):
+    if value is None:
+        raise WrongArgumentsException(Err.OA0032, [name])
+    if not isinstance(value, str):
+        raise WrongArgumentsException(Err.OA0033, [name])
+    if not min_length <= len(value) <= max_length:
+        raise WrongArgumentsException(Err.OA0048, [name, min_length, max_length])
+    if value.isspace():
+        raise WrongArgumentsException(Err.OA0065, [name])
+
+
+def _create_token(subject: str, token_type: str,
+                  expires_delta: timedelta,
+                  extra: dict[str, Any] | None = None) -> str:
     now = datetime.now(timezone.utc)
     payload: dict[str, Any] = {
-        "sub": subject,
+        "sub":  subject,
         "type": token_type,
-        "iat": now,
-        "exp": now + expires_delta,
+        "iat":  now,
+        "exp":  now + expires_delta,
     }
     if extra:
         payload.update(extra)
@@ -116,7 +93,6 @@ def create_refresh_token(user_id: str) -> str:
 
 
 def decode_token(token: str, expected_type) -> str:
-    from auth_service.auth_server.exceptions import InvalidTokenException
     try:
         payload = jwt.decode(
             token,
@@ -124,42 +100,10 @@ def decode_token(token: str, expected_type) -> str:
             algorithms=[settings.JWT_ALGORITHM],
         )
         if payload.get("type") != expected_type.value:
-            raise InvalidTokenException(
-                f"Expected {expected_type.value} token.")
+            raise InvalidTokenException(Err.OA0011)
         user_id: str = payload.get("sub")
         if not user_id:
-            raise InvalidTokenException()
+            raise InvalidTokenException(Err.OA0011)
         return user_id
-    except JWTError as exc:
-        raise InvalidTokenException(str(exc))
-
-
-def check_string_attribute(name: str, value, min_length=1, max_length=255):
-    from auth_service.auth_server.exceptions import WrongArgumentsException
-    if value is None:
-        raise WrongArgumentsException(f"{name} is required.")
-    if not isinstance(value, str):
-        raise WrongArgumentsException(f"{name} must be a string.")
-    if not min_length <= len(value) <= max_length:
-        raise WrongArgumentsException(
-            f"{name} must be between {min_length} and {max_length} characters.")
-    if value.isspace():
-        raise WrongArgumentsException(f"{name} cannot be blank.")
-
-
-def check_bool_attribute(name: str, value):
-    from auth_service.auth_server.exceptions import WrongArgumentsException
-    if not isinstance(value, bool):
-        raise WrongArgumentsException(f"{name} must be a boolean.")
-
-
-def check_list_attribute(name: str, value, required=True):
-    from auth_service.auth_server.exceptions import WrongArgumentsException
-    if value is None:
-        if not required:
-            return
-        raise WrongArgumentsException(f"{name} is required.")
-    if not isinstance(value, list):
-        raise WrongArgumentsException(f"{name} must be a list.")
-    
-
+    except JWTError:
+        raise InvalidTokenException(Err.OA0011)

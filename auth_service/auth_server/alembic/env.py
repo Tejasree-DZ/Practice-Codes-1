@@ -1,8 +1,51 @@
+from __future__ import with_statement
 import sys
 import os
 
-# Add the parent folder (auth_service) to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
-from auth_server.models.db_base import Base
-target_metadata = Base.metadata
+from alembic import context
+import auth_service.auth_server.models.models
+from auth_service.auth_server.settings import settings
+
+config = context.config
+
+if config.config_file_name is not None:
+    from logging.config import fileConfig
+    fileConfig(config.config_file_name)
+
+target_metadata = auth_service.auth_server.models.models.Base.metadata
+
+user, password, host, db, port = settings.auth_db_params()
+DB_URL = (
+    f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db}"
+    f"?sslmode=require&channel_binding=require"
+)
+
+
+def run_migrations_offline():
+    context.configure(
+        url=DB_URL,
+        target_metadata=target_metadata,
+        literal_binds=True,
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online():
+    from sqlalchemy import create_engine
+    connectable = create_engine(DB_URL)
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+        )
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()

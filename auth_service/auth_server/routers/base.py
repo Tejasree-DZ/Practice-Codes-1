@@ -1,3 +1,5 @@
 from fastapi import APIRouter
 
-router = APIRouter(prefix="/auth/v1")
+
+def make_router(**kwargs) -> APIRouter:
+    return APIRouter(**kwargs)

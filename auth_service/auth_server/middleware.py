@@ -1,40 +1,17 @@
 import logging
 import time
 
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
+from fastapi import Request
+
+LOG = logging.getLogger(__name__)
 
 
-logger = logging.getLogger("api_logger")
-
-
-class LoggingMiddleware(BaseHTTPMiddleware):
-
-    async def dispatch(self, request: Request, call_next):
-
-        start_time = time.time()
-
-        logger.info(
-            f"Incoming Request: {request.method} {request.url}"
-        )
-
-        try:
-
-            response = await call_next(request)
-
-        except Exception as e:
-
-            logger.error(
-                f"Error occurred: {str(e)}"
-            )
-
-            raise e
-
-        process_time = time.time() - start_time
-
-        logger.info(
-            f"Completed Response: {response.status_code} "
-            f"in {process_time:.4f}s"
-        )
-
-        return response
+async def log_requests(request: Request, call_next):
+    start = time.time()
+    LOG.info("→ %s %s", request.method, request.url.path)
+    response = await call_next(request)
+    duration = (time.time() - start) * 1000
+    LOG.info("← %s %s %s (%.1fms)",
+             request.method, request.url.path,
+             response.status_code, duration)
+    return response

@@ -1,12 +1,8 @@
-from datetime import datetime
-from pydantic import BaseModel
-
+from pydantic import BaseModel, ConfigDict
 
 class BaseSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
-    id: int | None = None
-    created_at: datetime | None = None
-    deleted_at: datetime | None = None
-
-    class Config:
-        from_attributes = True
+class TimestampMixin(BaseModel):
+    created_at: int
+    deleted_at: int
